@@ -1,7 +1,7 @@
 RVCC := riscv64-unknown-elf-gcc
 RVISA := -Wa,-march=rv64i
 RVAR := riscv64-unknown-elf-ar vr
-RVOBJDUMP := riscv64-unknown-elf-objdump -s
+RVOBJDUMP := riscv64-unknown-elf-objdump -Ss
 
 tests := add mul-div n! qsort simple-function
 
