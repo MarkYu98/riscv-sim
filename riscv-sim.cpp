@@ -12,6 +12,8 @@ void setconfig(Config &config)
         config.entry_addr = 0;          // Not used when set_entry_symbol is true or set_entry_addr is false
     config.max_memory_addr = 0xc0000000;// Max reachable address for RV64 program
     config.branch_prediction = PRED_ALWAYS;
+    config.heap_base = 0x1000000;
+    config.heap_max = 0x80000000;
 }
 
 int main(int argc, char** argv)

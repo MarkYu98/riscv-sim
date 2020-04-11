@@ -13,9 +13,10 @@ class Config {
 public:
     bool set_entry_symbol, set_entry_addr;
     uint8_t branch_prediction;
-    std::string entry_symbol;
     size_t entry_addr;   
     size_t max_memory_addr;
+    size_t heap_base, heap_max;
+    std::string entry_symbol;
 };
 
 #endif // RISCV_CONFIG_HPP

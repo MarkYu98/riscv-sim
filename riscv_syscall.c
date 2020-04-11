@@ -24,6 +24,24 @@ void sysexit(int status)
     asm("ecall");
 }
 
+void *mem_sbrk(unsigned size)
+{
+    asm("li a7, 6");
+    asm("ecall");
+}
+
+void *mem_heap_lo()
+{
+    asm("li a7, 7");
+    asm("ecall");
+}
+
+void *mem_heap_hi()
+{
+    asm("li a7, 8");
+    asm("ecall");
+}
+
 long long read_i()
 {
     asm("li a7, 4");

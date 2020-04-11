@@ -186,7 +186,7 @@ void RISCV_proc::load_prog()
     }
     cout << "Loaded." << endl;
 
-    load_memory();
+    // load_memory();
     bool entry_setted = false;
     if (config.set_entry_symbol || config.set_entry_addr) {
         if (config.set_entry_symbol) entry_setted = set_entry_symbol(config.entry_symbol);
@@ -210,7 +210,7 @@ void RISCV_proc::load_memory()
 {
     ELFIO::Elf_Half seg_num = elf_reader.segments.size();
     ELFIO::segment *pseg;
-    cout << "Loading ELF segments into user memory space..." << endl;
+    cout << "Loading ELF segments into user memory space ...";
     for (int i = 0; i < seg_num; i++) {
         pseg = elf_reader.segments[i];
         if (pseg->get_type() == PT_LOAD) { // Alloc: memcpy
@@ -220,9 +220,11 @@ void RISCV_proc::load_memory()
             write_memory(pseg->get_data(), pseg->get_virtual_address(), pseg->get_file_size(), flags);
             write_memory(NULL, pseg->get_virtual_address() + pseg->get_file_size(), 
                          pseg->get_memory_size() - pseg->get_file_size(), flags);
+            if (pseg->get_virtual_address() + pseg->get_memory_size() >= heap)
+                heap = ROUND_UP(pseg->get_virtual_address() + pseg->get_memory_size(), PGSIZE);
         }
     }
-    cout << "ELF segments loaded." << endl;
+    cout << "Loaded." << endl;
 }
 
 bool RISCV_proc::set_entry_symbol(const string &symbol) 
@@ -248,7 +250,7 @@ bool RISCV_proc::set_entry_symbol(const string &symbol)
 bool RISCV_proc::set_entry_addr(size_t addr) 
 {
     if (addr >= config.max_memory_addr) return false;
-    if (!PG_ALLOC(pg_table[addr]) || !PG_EXEC(pg_table[addr])) return false;
+    if (!PG_ALLOC(pg_table[PAGE(addr)]) || !PG_EXEC(pg_table[PAGE(addr)])) return false;
     entry_addr = addr;
     entry_literal = "0x" + dec2hex(addr);
     return true;
@@ -262,14 +264,14 @@ RISCV_proc::RISCV_proc(const ELFIO::elfio &reader, const Config &config)
 
 RISCV_proc::~RISCV_proc() 
 {
-    finish();
+    clear_pg_table();
 }
 
 void RISCV_proc::read_memory(char *buf, size_t vaddr, size_t len)
 {
     size_t curpg, start = vaddr, end = vaddr + len;
     while (vaddr < end) {
-        curpg = ROUND_DOWN(vaddr, PGSIZE);
+        curpg = PAGE(vaddr);
         pte_t &pte = pg_table[curpg];
         assert(PG_ALLOC(pte));
 
@@ -283,10 +285,10 @@ void RISCV_proc::write_memory(const char *buf, size_t vaddr, size_t len, uint8_t
 {
     size_t curpg, start = vaddr, end = vaddr + len;
     while (vaddr < end) {
-        curpg = ROUND_DOWN(vaddr, PGSIZE);
+        curpg = PAGE(vaddr);
         pte_t &pte = pg_table[curpg];
         if (flags) alloc_page(curpg, flags);
-        assert(PG_ALLOC(pte) && PG_WRITE(pte));
+        else assert(PG_ALLOC(pte) && PG_WRITE(pte));
 
         size_t copy_size = min(curpg + PGSIZE - vaddr, end - vaddr);
         if (buf)
@@ -299,7 +301,7 @@ void RISCV_proc::write_memory(const char *buf, size_t vaddr, size_t len, uint8_t
 
 void RISCV_proc::alloc_page(size_t vaddr, uint8_t flags)
 {
-    pte_t &pte = pg_table[ROUND_DOWN(vaddr, PGSIZE)];
+    pte_t &pte = pg_table[PAGE(vaddr)];
     if (PG_ALLOC(pte)) return;
     pte.pg = malloc(PGSIZE);
     pte.flags = (flags | PTE_P);
@@ -307,6 +309,7 @@ void RISCV_proc::alloc_page(size_t vaddr, uint8_t flags)
 
 template<typename T> T RISCV_proc::memread(size_t vaddr)
 {
+    if (!vaddr) return 0;
     T res;
     read_memory((char *)&res, vaddr, sizeof(T));
     return res;
@@ -372,9 +375,17 @@ void RISCV_proc::writeback()
     if (opcode == 0x33 || opcode == 0x03 || opcode == 0x13 || opcode == 0x3b ||
         opcode == 0x17 || opcode == 0x37 || opcode == 0x1b) {
         if (reg_W.rd != R_ZERO) reg_ulong[reg_W.rd] = reg_W.res;
+        if (reg_W.rd == R_SP) {
+            assert(reg_W.res >= config.heap_max);     // stack overflow
+            alloc_page(reg_W.res, PTE_W);
+        }
     }     
     else if (opcode == 0x67 || opcode == 0x6f) { 
         if (reg_W.rd != R_ZERO) reg_ulong[reg_W.rd] = reg_W.val;
+        if (reg_W.rd == R_SP) {
+            assert(reg_W.res >= config.heap_max);     // stack overflow
+            alloc_page(reg_W.val, PTE_W);
+        }
         setPC = true;
     }
     else if (opcode == 0x63 && reg_W.cond)
@@ -414,7 +425,26 @@ void RISCV_proc::writeback()
             inputstream >> c;
             reg_ulong[reg_W.rd] = REG(SREG(c));
         }   break;
+        case SYS_SBRK: {
+            size_t old_heap = heap;
+            while (heap + PGSIZE < old_heap + reg_W.res) {
+                heap += PGSIZE;
+                assert(heap < config.heap_max);     // heap overflow
+                alloc_page(heap, PTE_W);
+            }
+            heap = reg_W.res;
+            assert(heap < config.heap_max);     // heap overflow
+            alloc_page(heap, PTE_W);
+            reg_ulong[reg_W.rd] = REG(old_heap);
+        }   break;
+        case SYS_HEAP_LO: 
+            reg_ulong[reg_W.rd] = config.heap_base;
+            break;
+        case SYS_HEAP_HI:
+            reg_ulong[reg_W.rd] = config.heap_max;
+            break;
         case SYS_EXIT:
+            flag_finished = true;
             reg_ulong[reg_W.rd] = reg_W.res;
             break;
         }
@@ -422,8 +452,6 @@ void RISCV_proc::writeback()
 #ifndef PIPE
     if (setPC)
         reg_F.PC = reg_W.res;
-#else 
-    reg_w.PC = reg_W.res;
 #endif
 }   
 
@@ -454,6 +482,11 @@ void RISCV_proc::set_pipe_control()
 {
     ctrl_F = ctrl_D = ctrl_E = ctrl_M = ctrl_W = PCTRL_NORMAL;
     mispred = false;
+    if (reg_E.opcode == 0x73 || reg_M.opcode == 0x73 || reg_W.opcode == 0x73) {     // ECALL
+        ctrl_E = PCTRL_BUBBLE;
+        ctrl_D = PCTRL_STALL;
+        ctrl_F = PCTRL_STALL;
+    }
     if (reg_E.opcode == 0x03 && (RS1(reg_D.inst) == reg_E.rd || RS2(reg_D.inst) == reg_E.rd)) {   // LXX
         ctrl_E = PCTRL_BUBBLE;
         ctrl_D = PCTRL_STALL;
@@ -478,12 +511,12 @@ void RISCV_proc::set_pipe_control()
 PIPE_REG_F RISCV_proc::select_PC()
 {
     PIPE_REG_F result;
-    if (reg_d.opcode == 0x67) {   // JALR in D
-        result.PC = reg_d.src1 + reg_d.src2;
-        return result;
-    }
     if (mispred) {
         result.PC = reg_e.PC + sizeof(raw_inst_t);
+        return result;
+    }
+    if (reg_d.opcode == 0x67) {   // JALR in D
+        result.PC = reg_d.src1 + reg_d.src2;
         return result;
     }
     result.PC = reg_F.PC;
@@ -506,8 +539,7 @@ void RISCV_proc::execute(unsigned steps)
 {
     unsigned s = 0;
     do {
-        if (flag_finished) wrap_up--;
-        s += 1;
+        s++;
         for (auto &bp : breakpoints) 
             if (bp.addr == reg_W.PC && bp.activated) {
                 cout << "Breakpoint at " << bp.literal << endl;
@@ -531,19 +563,20 @@ void RISCV_proc::execute(unsigned steps)
 
         // Update the PIPE regs
         clock_tick();
+        if (!reg_W.PC) s--;
 
         // Set PIPE controls
         set_pipe_control();
 
         if (s == steps) break;
-    } while (!flag_finished || wrap_up);
+    } while (!flag_finished);
 }
 #else 
 void RISCV_proc::execute(unsigned steps) 
 {
     unsigned s = 0;
     do {
-        s += 1;
+        s++;
         for (auto &bp : breakpoints) 
             if (bp.addr == reg_F.PC && bp.activated) {
                 cout << "Breakpoint at " << bp.literal << endl;
@@ -571,19 +604,24 @@ void RISCV_proc::run_simulator()
     string cmd, tmp;
     int steps;
 
-    load_memory();
     memset(reg_ulong, 0, sizeof(reg_ulong));
     inputstream.str("");
     inputstream.clear();
     breakpoints.clear();
     curbp = nullptr;
 
+    clear_pg_table();
     reg_F.PC = entry_addr;
-    reg_ulong[R_SP] = config.max_memory_addr;
+    reg_ulong[R_SP] = config.max_memory_addr - 8;   // stack
+    heap = config.heap_base;                        // heap
+    load_memory();
+    heap_base = heap;
+    alloc_page(reg_ulong[R_SP], PTE_W);
+    alloc_page(heap, PTE_W);
     flag_finished = false;
     flag_break = false;
     
-    cout << "Started at <" << entry_literal << ">: ";
+    cout << "Started at " << entry_literal << ": ";
     cout << RISCV_inst(memread<raw_inst_t>(reg_F.PC)) << endl;
 #ifdef PIPE
     // Warmup
@@ -592,26 +630,20 @@ void RISCV_proc::run_simulator()
 #endif
     while (1) {
         if (flag_finished) {
-#ifdef PIPE
-            // Wrap up
-            ctrl_M = ctrl_E = ctrl_D = PCTRL_BUBBLE;
-            if (!wrap_up) {
-#endif
             cout << "Program exited with code: " << reg_ulong[R_A5] << endl;
             break;
         }
 #ifdef PIPE
-        }
         REG pc = reg_W.PC;
         if (!pc) pc = reg_M.PC;
         if (!pc) pc = reg_E.PC;
-        if (!PG_EXEC(pg_table[pc])) {
+        if (!PG_EXEC(pg_table[PAGE(pc)])) {
             cout << "Fatal: PC Encountered unexecutable memory address! Execution stopped." << endl;
             break;
         }
         cout << "next inst.: <0x" << dec2hex(pc) << ">\t" << RISCV_inst(memread<raw_inst_t>(pc)) << endl;
 #else
-        if (!PG_EXEC(pg_table[reg_F.PC])) {
+        if (!PG_EXEC(pg_table[PAGE(reg_F.PC)])) {
             cout << "Fatal: PC Encountered unexecutable memory address! Execution stopped." << endl;
             break;
         }
@@ -674,10 +706,9 @@ void RISCV_proc::run_simulator()
         }
         else status(cmd);
     }
-    finish();
 }
 
-void RISCV_proc::finish() 
+void RISCV_proc::clear_pg_table() 
 {
     pgtb_t::iterator it;
     for (it = pg_table.begin(); it != pg_table.end(); it++) {
@@ -744,7 +775,7 @@ void RISCV_proc::set_breakpoint(const string& cmd)
         ss << cmd.substr(2, cmd.size());
         ss >> addr_s;
         try {
-            addr = ROUND_UP(stoi(addr_s, 0, 0), sizeof(raw_inst_t));
+            addr = ROUND_UP(stol(addr_s, 0, 0), sizeof(raw_inst_t));
         } catch (invalid_argument) {
             cout << "Error: Unidentified breakpoint address." << endl;
             return;
@@ -752,7 +783,7 @@ void RISCV_proc::set_breakpoint(const string& cmd)
         if (addr < 0 || addr >= config.max_memory_addr) 
             cout << "Breakpoint: address out of range." << endl;
         else {
-            if (!PG_ALLOC(pg_table[addr]) || !PG_EXEC(pg_table[addr]))
+            if (!PG_ALLOC(pg_table[PAGE(addr)]) || !PG_EXEC(pg_table[PAGE(addr)]))
                 cout << "Breakpoint: address not executable, cannot set there." << endl;
             else {
                 Breakpoint bp = Breakpoint(addr, "<0x"+ dec2hex(addr)+">");
@@ -809,7 +840,7 @@ void RISCV_proc::status(const string& cmd)
                 ss << cmd.substr(6, cmd.size());
                 ss >> addr_s >> count;
                 try {
-                    reg_num = stoi(addr_s, 0, 0);
+                    reg_num = stol(addr_s, 0, 0);
                 } catch (invalid_argument) {
                     cout << "Error: Unidentified register number." << endl;
                     return;
@@ -824,7 +855,7 @@ void RISCV_proc::status(const string& cmd)
                 ss << cmd.substr(5, cmd.size());
                 ss >> addr_s >> count;
                 try {
-                    addr = ROUND_DOWN(stoi(addr_s, 0, 0), bytes ? bytes : sizeof(raw_inst_t));
+                    addr = ROUND_DOWN(stol(addr_s, 0, 0), bytes ? bytes : sizeof(raw_inst_t));
                 } catch (invalid_argument) {
                     cout << "Error: Unidentified memory address." << endl;
                     return;
@@ -853,14 +884,14 @@ void RISCV_proc::status(const string& cmd)
                     cout << "Error: Memory address out of range." << endl;
                     break;
                 }
-                else if (!PG_ALLOC(pg_table[addr])) {
+                else if (!PG_ALLOC(pg_table[PAGE(addr)])) {
                     cout << "Error: Address in unallocated page." << endl;
                     break;
                 }
                 else {
                     cout << dec2hex(addr, sizeof(size_t)) << ":\t";
                     if (bytes == 0) {   // 'i'
-                        if (!PG_EXEC(pg_table[addr])) {
+                        if (!PG_EXEC(pg_table[PAGE(addr)])) {
                             cout << "Error: Address not executable." << endl;
                             break;
                         }
@@ -1027,20 +1058,8 @@ PIPE_REG_M RISCV_proc::calc_reg_M()
     result.funct3 = reg_E.funct3;
     if (reg_E.opcode == 0x73) { // ECALL
         // cout << "SYSCALL" << endl;
-        switch (reg_E.src2) {
-        case SYS_EXIT:
-            flag_finished = true;
-        case SYS_PRINT_I:
-        case SYS_PRINT_C:
-        case SYS_PRINT_S:
-        case SYS_READ_I:
-        case SYS_READ_C:
-            result.res = reg_E.src1;
-            result.val = reg_E.src2;
-            break;
-        default:
-            cout << "Unknown syscall num: " << reg_E.src2 << endl;
-        }
+        result.res = reg_E.src1;
+        result.val = reg_E.src2;
     }
     else {
         result.res = alu_calc(reg_E.src1, reg_E.src2, reg_E.alu_func);

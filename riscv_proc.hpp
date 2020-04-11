@@ -15,7 +15,8 @@
 #define PTE_X       0x4
 #define PG_ALLOC(pte) (pte.flags & PTE_P)
 #define PG_WRITE(pte) (pte.flags & PTE_W)
-#define PG_EXEC(pte) (pte.flags & PTE_X)
+#define PG_EXEC(pte)  (pte.flags & PTE_X)
+#define PAGE(vaddr)   ROUND_DOWN(vaddr, PGSIZE)
 
 #define STACK_ALIGN 1024
 
@@ -45,6 +46,9 @@
 #define SYS_PRINT_S 3
 #define SYS_READ_I  4
 #define SYS_READ_C  5
+#define SYS_SBRK    6       // Extend heap for malloc
+#define SYS_HEAP_LO 7
+#define SYS_HEAP_HI 8
 #define SYS_EXIT    93
 
 #ifdef PIPE
@@ -57,7 +61,7 @@ typedef long long SREG;
 
 typedef struct {
     uint8_t flags = 0;
-    void *pg = nullptr;
+    void *pg = NULL;
 } pte_t;
 typedef std::map<size_t, pte_t> pgtb_t;    // PageTable
 
@@ -161,6 +165,7 @@ private:
     std::vector<Breakpoint> breakpoints;
     bool flag_finished, flag_break;
     size_t entry_addr, entry_offset;
+    size_t heap, heap_base;
     std::string entry_literal;
     std::stringstream inputstream;
 
@@ -185,7 +190,6 @@ private:
     PipeControl ctrl_F, ctrl_D, ctrl_E, ctrl_M, ctrl_W;
 
     bool mispred;
-    int wrap_up = 2;
     void clock_tick();
     void set_pipe_control();
     REG predict_PC(REG thisPC, int imm);
@@ -203,7 +207,7 @@ private:
     void load_memory();
     bool get_symbol(const std::string &symbol, ELF_SYMBOL** psym);
     void execute(unsigned steps);
-    void finish();
+    void clear_pg_table();
 
     void fetch();
     void decode();
