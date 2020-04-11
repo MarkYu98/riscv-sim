@@ -6,6 +6,8 @@
 */
 
 #include <riscv_syscall.h>
+#include <riscv_memlib.h>
+#include <stdio.h>
 
 void matrix_mul(int n, int A[][n], int B[][n], int C[][n])
 {
@@ -22,12 +24,13 @@ int main()
 {
 	int n = read_i();
 	long long seed = read_i();
+	char ch[15];
+	sprintf(ch, "n=%d seed=%d\n", n, (int)seed);
+	print_s(ch);
 
-	printf("n=%d t=%d seed=%d\n", n, t, (int)seed);
-
-	double (*A)[n] = (double(*)[n])malloc(n * n * sizeof(double));
-	double (*B)[n] = (double(*)[n])malloc(n * n * sizeof(double));
-	double (*C)[n] = (double(*)[n])malloc(n * n * sizeof(double));
+	int (*A)[n] = (int(*)[n])malloc(n * n * sizeof(int));
+	int (*B)[n] = (int(*)[n])malloc(n * n * sizeof(int));
+	int (*C)[n] = (int(*)[n])malloc(n * n * sizeof(int));
 	for (int i = 0; i < n; i++)
 		for (int j = 0; j < n; j++) {
 		seed = seed * 48271 % 2147483647;
@@ -36,9 +39,7 @@ int main()
 		B[i][j] = seed % 10000;
 	}
 
-	for (int i = 0; i < t; i++) {
-		matrix_mul(A, B, C);
-	}
+	matrix_mul(n, A, B, C);
 
 	return 0;
 }

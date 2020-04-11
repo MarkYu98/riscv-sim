@@ -1,6 +1,6 @@
 #include "riscv_syscall.h"
 
-void print_i(long long x)
+void print_i(long x)
 {
     asm("li a7, 1");
     asm("ecall");
@@ -24,7 +24,7 @@ void sysexit(int status)
     asm("ecall");
 }
 
-void *mem_sbrk(unsigned size)
+void *mem_sbrk(size_t size)
 {
     asm("li a7, 6");
     asm("ecall");

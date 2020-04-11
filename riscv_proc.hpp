@@ -21,25 +21,34 @@
 #define STACK_ALIGN 1024
 
 #define ALU_ADD     0
-#define ALU_MUL     1
-#define ALU_SUB     2
-#define ALU_SLL     3
-#define ALU_MULH    4
-#define ALU_SLT     5
-#define ALU_XOR     6
-#define ALU_DIV     7
-#define ALU_SRL     8
-#define ALU_SRA     9
-#define ALU_OR      10
-#define ALU_REM     11
-#define ALU_AND     12
-#define ALU_ADDW    13
-#define ALU_SUBW    14
-#define ALU_SLLW    15
-#define ALU_SRLW    16
-#define ALU_SRAW    17
-#define ALU_SLTU    18
-#define ALU_NOP     19
+#define ALU_SUB     1
+#define ALU_SLL     2
+#define ALU_SLT     3
+#define ALU_SLTU    4
+#define ALU_XOR     5
+#define ALU_SRL     6
+#define ALU_SRA     7
+#define ALU_OR      8
+#define ALU_AND     9
+#define ALU_ADDW    10
+#define ALU_SUBW    11
+#define ALU_SLLW    12
+#define ALU_SRLW    13
+#define ALU_SRAW    14
+#define ALU_MUL     15
+#define ALU_MULH    16
+#define ALU_MULHSU  17
+#define ALU_MULHU   18
+#define ALU_DIV     19
+#define ALU_DIVU    20
+#define ALU_REM     21
+#define ALU_REMU    22
+#define ALU_MULW    23
+#define ALU_DIVW    24
+#define ALU_DIVUW   25
+#define ALU_REMW    26
+#define ALU_REMUW   27
+#define ALU_NOP     28
 
 #define SYS_PRINT_I 1
 #define SYS_PRINT_C 2
@@ -77,6 +86,8 @@ static size_t ROUND_DOWN(size_t bytes, size_t ALIGN)
     return (bytes) & ~(ALIGN - 1);
 }
 
+std::string dec2hex(size_t i);
+std::string dec2hex(size_t i, size_t bytes);
 REG alu_calc(REG src1, REG src2, unsigned ALU_FUNC);
 
 struct PIPE_REG_F {
@@ -169,6 +180,8 @@ private:
     std::string entry_literal;
     std::stringstream inputstream;
 
+    size_t inst_count;
+
     pgtb_t pg_table;
     REG reg_ulong[32];
 
@@ -182,6 +195,7 @@ private:
     PIPE_REG_M reg_M;
     PIPE_REG_W reg_W;
 #ifdef PIPE
+    size_t pipe_cycle_count;
     PIPE_REG_F reg_w;
     PIPE_REG_D reg_f;
     PIPE_REG_E reg_d;
@@ -189,7 +203,7 @@ private:
     PIPE_REG_W reg_m;
     PipeControl ctrl_F, ctrl_D, ctrl_E, ctrl_M, ctrl_W;
 
-    bool mispred;
+    uint8_t mispred;
     void clock_tick();
     void set_pipe_control();
     REG predict_PC(REG thisPC, int imm);
@@ -206,8 +220,9 @@ private:
 
     void load_memory();
     bool get_symbol(const std::string &symbol, ELF_SYMBOL** psym);
-    void execute(unsigned steps);
+    void execute(size_t steps);
     void clear_pg_table();
+    void clear_regs();
 
     void fetch();
     void decode();
@@ -223,6 +238,7 @@ private:
     void run_simulator();
     void set_breakpoint(const std::string& cmd);
     void status(const std::string& cmd);
+    void summary(bool finished);
     void shell();
     void exit();
 };

@@ -2,40 +2,54 @@ CXX := g++
 CXXFlags := -I. -Iinclude -O3
 targets := riscv-sim riscv-sim-pipe
 srcs := riscv-sim.cpp riscv_proc.cpp
-headers := riscv_config.hpp riscv_isa.hpp riscv_proc.hpp
+hdrs := riscv_config.hpp riscv_isa.hpp riscv_proc.hpp
+
+libsrcs := riscv_memlib.c riscv_syscall.c 
+libhdrs := riscv_memlib.h riscv_syscall.h
+libobjs := riscv_memlib.o riscv_syscall.o 
 
 RVCC := riscv64-unknown-elf-gcc
-RVISA := -Wa,-march=rv64i
+RV64I := -Wa,-march=rv64i
+RV64M := -Wa,-march=rv64im
 RVLIBCFLAGS := -ffunction-sections -fdata-sections
 RVAR := riscv64-unknown-elf-ar vr
 RVOBJDUMP := riscv64-unknown-elf-objdump 
 
 SUBDIRS = $(shell find . * -type d | grep -v "\.")
 
-.PHONY:all clean
+.PHONY: all clean rv64i rv64m
 
-all: $(targets) tests mytests
+all: $(targets) rv64i rv64m
+rv64i: $(targets) tests_i mytests_i
+rv64m: $(targets) tests_m mytests_m
 
 tests: 
 	$(MAKE) -C test
+tests_i:
+	$(MAKE) -C test rv64i
+tests_m:
+	$(MAKE) -C test rv64m
 
-mytests: librvsys.a
+mytests: librvsysi.a librvsysm.a
 	$(MAKE) -C mytest
+mytests_i: librvsysi.a
+	$(MAKE) -C mytest rv64i
+mytests_m: librvsysm.a
+	$(MAKE) -C mytest rv64m
 
-riscv-sim: $(srcs) $(headers)
+riscv-sim: $(srcs) $(hdrs)
 	$(CXX) -o riscv-sim $(srcs) $(CXXFlags)
 
-riscv-sim-pipe: $(srcs) $(headers)
+riscv-sim-pipe: $(srcs) $(hdrs)
 	$(CXX) -o riscv-sim-pipe $(srcs) $(CXXFlags) -DPIPE
 
-librvsys.a: riscv_syscall.o riscv_memlib.o
-	$(RVAR) librvsys.a riscv_syscall.o riscv_memlib.o
+librvsysi.a: $(libsrcs) $(libhdrs)
+	$(RVCC) $(RV64I) $(RVLIBCFLAGS) -c $(libsrcs) 
+	$(RVAR) librvsysi.a $(libobjs)
 
-riscv_memlib.o: riscv_memlib.c riscv_memlib.h
-	$(RVCC) $(RVISA) $(RVLIBCFLAGS) -c riscv_memlib.c
-
-riscv_syscall.o: riscv_syscall.c riscv_syscall.h
-	$(RVCC) $(RVISA) $(RVLIBCFLAGS) -c riscv_syscall.c
+librvsysm.a: $(libsrcs) $(libhdrs)
+	$(RVCC) $(RV64M) $(RVLIBCFLAGS) -c $(libsrcs) 
+	$(RVAR) librvsysm.a $(libobjs)
 
 clean:
 	rm -f *.o *.a $(targets)

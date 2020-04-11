@@ -1,19 +1,15 @@
 #include <iostream>
+#include <fstream>
 #include <elfio/elfio.hpp>
 #include <riscv_proc.hpp>
 #include <riscv_config.hpp>
 using namespace std;
 
-void setconfig(Config &config)
+void load_config(Config &config, const char *filename)
 {
-    config.set_entry_symbol = false;    // Overwrite default entry point in ELF
-        config.entry_symbol = "main";   // Not used when set_entry_symbol is false
-    config.set_entry_addr = false;      // Overwrite default entry point in ELF
-        config.entry_addr = 0;          // Not used when set_entry_symbol is true or set_entry_addr is false
-    config.max_memory_addr = 0xc0000000;// Max reachable address for RV64 program
-    config.branch_prediction = PRED_ALWAYS;
-    config.heap_base = 0x1000000;
-    config.heap_max = 0x80000000;
+    ifstream fin(filename);
+    cereal::JSONInputArchive iarchive(fin);
+    iarchive(config);
 }
 
 int main(int argc, char** argv)
@@ -27,7 +23,7 @@ int main(int argc, char** argv)
     // Create elfio reader
     ELFIO::elfio reader;
     Config config;
-    setconfig(config);
+    config.load("config.json");
 
     // Load ELF data
     if (!reader.load(argv[1])) {

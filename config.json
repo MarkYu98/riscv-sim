@@ -1,0 +1,10 @@
+{
+    "set_entry_symbol": false,
+    "set_entry_addr": false,
+    "entry_addr": "0x0",
+    "max_memory_addr": "0xc0000000",
+    "heap_base": "0x1000000",
+    "heap_max": "0x80000000",
+    "entry_symbol": "main",
+    "branch_prediction": "btfnt"
+}

@@ -1,37 +1,34 @@
 #include <riscv_proc.hpp>
+#include <riscv_config.hpp>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <assert.h>
 using namespace std;
 
+    
+
 REG alu_calc(REG src1, REG src2, unsigned ALU_FUNC)
 {
     switch (ALU_FUNC) {
     case ALU_ADD:
         return (SREG)src1 + (SREG)src2;
-    case ALU_MUL:
-        return REG(__int128_t(src1 * src2) & (((__int128_t)1<<(sizeof(REG)*8))-1));
     case ALU_SUB:
         return (SREG)src1 - (SREG)src2;
     case ALU_SLL:
         return src1 << (src2 & 0x3f);
-    case ALU_MULH:
-        return REG(__int128_t(src1 * src2) >> (sizeof(REG)*8));
     case ALU_SLT:
         return ((SREG)src1 < (SREG)src2) ? 1 : 0;
+    case ALU_SLTU:
+        return (src1 < src2) ? 1 : 0;
     case ALU_XOR:
         return src1 ^ src2;
-    case ALU_DIV:
-        return (SREG)src1 / (SREG)src2;
     case ALU_SRL:
         return src1 >> (src2 & 0x3f);
     case ALU_SRA:
         return REG((SREG(src1)) >> (src2 & 0x3f));
     case ALU_OR:
         return src1 | src2;
-    case ALU_REM:
-        return src1 % src2;
     case ALU_AND:
         return src1 & src2;
     case ALU_ADDW:
@@ -44,12 +41,52 @@ REG alu_calc(REG src1, REG src2, unsigned ALU_FUNC)
         return REG(SREG(int(src1 >> (src2 & 0x3f))));
     case ALU_SRAW:
         return REG(SREG(int((SREG(src1)) >> (src2 & 0x3f))));
+    case ALU_MUL:
+        // return REG(__int128_t(src1 * src2) & (((__int128_t)1<<(sizeof(REG)*8))-1));
+        return REG(SREG(src1) * SREG(src2));
+    case ALU_MULH:
+        return REG((__int128_t(SREG(src1)) * __int128_t(SREG(src2))) >> (sizeof(REG)*8));
+    case ALU_MULHSU:
+        return REG((__int128_t(SREG(src1)) * __int128_t(src2)) >> (sizeof(REG)*8));
+    case ALU_MULHU:
+        return REG((__int128_t(src1) * __int128_t(src2)) >> (sizeof(REG)*8));
+    case ALU_MULW:
+        return REG(SREG(int(src1) * int(src2)));
+    case ALU_DIV:
+        if (src2 == 0) return REG(-1);
+        return (SREG)src1 / (SREG)src2;
+    case ALU_DIVU:
+        if (src2 == 0) return REG(-1);
+        return src1 / src2;
+    case ALU_DIVW:
+        if (src2 == 0) return REG(-1);
+        return REG(SREG(int(src1) / int(src2)));
+    case ALU_DIVUW:
+        if (src2 == 0) return REG(-1);
+        return REG(SREG(unsigned(src1) / unsigned(src2)));
+    case ALU_REM:
+        if (src2 == 0) return src1;
+        return (SREG)src1 % (SREG)src2;
+    case ALU_REMU:
+        if (src2 == 0) return src1;
+        return src1 % src2;
+    case ALU_REMW:
+        if (src2 == 0) return (int)src1;
+        return REG(SREG(int(src1) % int(src2)));
+    case ALU_REMUW:
+        if (src2 == 0) return (unsigned)src1;
+        return REG(SREG(unsigned(src1) % unsigned(src2)));
     default:
         return 0;
     }
 }
 
-string dec2hex(REG i, size_t bytes = 0)
+string dec2hex(size_t i)
+{
+    return dec2hex(i, 0);
+}
+
+string dec2hex(size_t i, size_t bytes)
 {
     stringstream ioss; 
     string s_temp; 
@@ -62,7 +99,7 @@ string dec2hex(REG i, size_t bytes = 0)
     return s;
 }
 
-string reg_format(REG num, size_t bytes)
+static string reg_format(REG num, size_t bytes)
 {
     string full = dec2hex(num, sizeof(REG));
     string res = "";
@@ -273,6 +310,7 @@ void RISCV_proc::read_memory(char *buf, size_t vaddr, size_t len)
     while (vaddr < end) {
         curpg = PAGE(vaddr);
         pte_t &pte = pg_table[curpg];
+        if (!PG_ALLOC(pte)) cout << dec2hex(vaddr) << endl;
         assert(PG_ALLOC(pte));
 
         size_t copy_size = min(curpg + PGSIZE - vaddr, end - vaddr);
@@ -376,6 +414,11 @@ void RISCV_proc::writeback()
         opcode == 0x17 || opcode == 0x37 || opcode == 0x1b) {
         if (reg_W.rd != R_ZERO) reg_ulong[reg_W.rd] = reg_W.res;
         if (reg_W.rd == R_SP) {
+            if (reg_W.res < config.heap_max) {
+                cout << dec2hex(reg_W.res) << endl;
+                cout << config.heap_max << endl;
+                cout << dec2hex(reg_F.PC) << endl;
+            }
             assert(reg_W.res >= config.heap_max);     // stack overflow
             alloc_page(reg_W.res, PTE_W);
         }
@@ -432,7 +475,7 @@ void RISCV_proc::writeback()
                 assert(heap < config.heap_max);     // heap overflow
                 alloc_page(heap, PTE_W);
             }
-            heap = reg_W.res;
+            heap = old_heap + reg_W.res;
             assert(heap < config.heap_max);     // heap overflow
             alloc_page(heap, PTE_W);
             reg_ulong[reg_W.rd] = REG(old_heap);
@@ -458,15 +501,18 @@ void RISCV_proc::writeback()
 #ifdef PIPE
 REG RISCV_proc::predict_PC(REG thisPC, int imm)
 {
-    if (config.branch_prediction == PRED_NEVER)
-        return thisPC + sizeof(raw_inst_t);
-    else if (config.branch_prediction == PRED_ALWAYS) {
+    if (!config.branch_prediction.compare("always")) {
         return thisPC + imm;
     }
-    else if (config.branch_prediction == PRED_FTBNT) {
+    else if (!config.branch_prediction.compare("ftbnt")) {
         if (imm > 0) return thisPC + imm;
         else return thisPC + sizeof(raw_inst_t);
     }
+    else if (!config.branch_prediction.compare("btfnt")) {
+        if (imm < 0) return thisPC + imm;
+        else return thisPC + sizeof(raw_inst_t);
+    }
+    return thisPC + sizeof(raw_inst_t);
 }
 
 void RISCV_proc::clock_tick()
@@ -476,12 +522,13 @@ void RISCV_proc::clock_tick()
     CLOCK_TICK(d, E);
     CLOCK_TICK(e, M);
     CLOCK_TICK(m, W);
+    pipe_cycle_count++;
 }
 
 void RISCV_proc::set_pipe_control()
 {
     ctrl_F = ctrl_D = ctrl_E = ctrl_M = ctrl_W = PCTRL_NORMAL;
-    mispred = false;
+    mispred = 0;
     if (reg_E.opcode == 0x73 || reg_M.opcode == 0x73 || reg_W.opcode == 0x73) {     // ECALL
         ctrl_E = PCTRL_BUBBLE;
         ctrl_D = PCTRL_STALL;
@@ -497,12 +544,13 @@ void RISCV_proc::set_pipe_control()
         ctrl_D = PCTRL_BUBBLE;
     }
     if (reg_E.opcode == 0x63) {             // BXX
-        if ((reg_E.cond && (predict_PC(reg_E.src1, reg_E.src2) != reg_E.src1 + reg_E.src2)) || 
-            (!reg_E.cond && (predict_PC(reg_E.src1, reg_E.src2) == reg_E.src1 + reg_E.src2))) {
+        if ((reg_E.cond && (predict_PC(reg_E.src1, reg_E.src2) != (SREG)reg_E.src1 + (SREG)reg_E.src2)) || 
+            (!reg_E.cond && (predict_PC(reg_E.src1, reg_E.src2) == (SREG)reg_E.src1 + (SREG)reg_E.src2))) {
                 ctrl_E = PCTRL_BUBBLE;
                 ctrl_D = PCTRL_BUBBLE;
                 ctrl_F = PCTRL_NORMAL;
-                mispred = true;
+                if (reg_E.cond) mispred = 1;
+                else mispred = 2;
             }
     }
     
@@ -512,7 +560,8 @@ PIPE_REG_F RISCV_proc::select_PC()
 {
     PIPE_REG_F result;
     if (mispred) {
-        result.PC = reg_e.PC + sizeof(raw_inst_t);
+        if (mispred == 1) result.PC = (SREG)reg_E.src1 + (SREG)reg_E.src2;
+        else result.PC = reg_e.PC + sizeof(raw_inst_t);
         return result;
     }
     if (reg_d.opcode == 0x67) {   // JALR in D
@@ -535,9 +584,9 @@ PIPE_REG_F RISCV_proc::select_PC()
     return result;
 }
 
-void RISCV_proc::execute(unsigned steps) 
+void RISCV_proc::execute(size_t steps) 
 {
-    unsigned s = 0;
+    size_t s = 0;
     do {
         s++;
         for (auto &bp : breakpoints) 
@@ -570,11 +619,12 @@ void RISCV_proc::execute(unsigned steps)
 
         if (s == steps) break;
     } while (!flag_finished);
+    inst_count += s;
 }
 #else 
-void RISCV_proc::execute(unsigned steps) 
+void RISCV_proc::execute(size_t steps) 
 {
-    unsigned s = 0;
+    size_t s = 0;
     do {
         s++;
         for (auto &bp : breakpoints) 
@@ -595,6 +645,7 @@ void RISCV_proc::execute(unsigned steps)
         writeback();
         if (s == steps) break;
     } while (!flag_finished);
+    inst_count += s;
 }
 #endif
 
@@ -604,7 +655,7 @@ void RISCV_proc::run_simulator()
     string cmd, tmp;
     int steps;
 
-    memset(reg_ulong, 0, sizeof(reg_ulong));
+    clear_regs();
     inputstream.str("");
     inputstream.clear();
     breakpoints.clear();
@@ -618,15 +669,19 @@ void RISCV_proc::run_simulator()
     heap_base = heap;
     alloc_page(reg_ulong[R_SP], PTE_W);
     alloc_page(heap, PTE_W);
-    flag_finished = false;
-    flag_break = false;
+
+#ifdef PIPE
+    pipe_cycle_count = 0;
+#endif
+    inst_count = 0;
+    flag_finished = flag_break = false;
     
     cout << "Started at " << entry_literal << ": ";
     cout << RISCV_inst(memread<raw_inst_t>(reg_F.PC)) << endl;
 #ifdef PIPE
     // Warmup
     set_pipe_control();
-    execute(4);
+    execute(1);
 #endif
     while (1) {
         if (flag_finished) {
@@ -635,8 +690,6 @@ void RISCV_proc::run_simulator()
         }
 #ifdef PIPE
         REG pc = reg_W.PC;
-        if (!pc) pc = reg_M.PC;
-        if (!pc) pc = reg_E.PC;
         if (!PG_EXEC(pg_table[PAGE(pc)])) {
             cout << "Fatal: PC Encountered unexecutable memory address! Execution stopped." << endl;
             break;
@@ -706,6 +759,7 @@ void RISCV_proc::run_simulator()
         }
         else status(cmd);
     }
+    summary(true);
 }
 
 void RISCV_proc::clear_pg_table() 
@@ -716,6 +770,16 @@ void RISCV_proc::clear_pg_table()
             free(it->second.pg);
     }
     pg_table.clear();
+}
+
+void RISCV_proc::clear_regs()
+{
+    memset(reg_ulong, 0, sizeof(reg_ulong));
+    reg_F = PIPE_REG_F();
+    reg_D = PIPE_REG_D();
+    reg_E = PIPE_REG_E();
+    reg_M = PIPE_REG_M();
+    reg_W = PIPE_REG_W(); 
 }
 
 void RISCV_proc::start()
@@ -911,6 +975,16 @@ void RISCV_proc::status(const string& cmd)
     }
     else cout << "Unrecognized command: " << cmd << endl;
     return;
+}
+
+void RISCV_proc::summary(bool finished)
+{
+    if (finished)
+        cout << endl << "================SUMMARY================" << endl;
+    cout << "Total instructions executed: " << dec << inst_count << endl;
+#ifdef PIPE
+    cout << "Total Pipeline cycle: " << dec << pipe_cycle_count << endl;
+#endif
 }
 
 void RISCV_proc::exit()

@@ -83,15 +83,19 @@ enum INST_TYPE
 
 enum R_INST_TYPE
 {
-    R_ADD, R_MUL, R_SUB, R_SLL, R_MULH, R_SLT, R_XOR, 
-    R_DIV, R_SRL, R_SRA, R_OR, R_REM, R_AND, R_ADDW, 
-    R_SUBW, R_SLLW, R_SRLW, R_SRAW, R_UNIMP
+    R_ADD, R_SUB, R_SLL, R_SLT, R_SLTU, R_XOR,
+    R_SRL, R_SRA, R_OR, R_AND, R_ADDW, R_SUBW, 
+    R_SLLW, R_SRLW, R_SRAW, R_MUL, R_MULH, R_MULHSU, 
+    R_MULHU, R_DIV, R_DIVU, R_REM, R_REMU, R_MULW,
+    R_DIVW, R_DIVUW, R_REMW, R_REMUW, R_UNIMP
 };
 const std::string R_INST_NAME[] = 
 {
-    "add", "mul", "sub", "sll", "mulh", "slt", "xor",
-    "div", "srl", "sra", "or", "rem", "and", "addw",
-    "subw", "sllw", "srlw", "sraw", "unimp"
+    "add", "sub", "sll", "slt", "sltu", "xor",
+    "srl", "sra", "or", "and", "addw", "subw", 
+    "sllw", "srlw", "sraw", "mul", "mulh", "mulhsu",
+    "mulhu", "div", "divu", "rem", "remu", "mulw",
+    "divw", "divuw", "remw", "remuw", "unimp"
 };
 
 enum I_INST_TYPE
@@ -173,7 +177,10 @@ struct RISCV_inst
                     if (inst.inst_r.opcode == 0x33) subtype.type_r = R_ADD;
                     else if (inst.inst_r.opcode == 0x3b) subtype.type_r = R_ADDW;
                 }
-                else if (inst.inst_r.funct7 == 0x01) subtype.type_r = R_MUL;
+                else if (inst.inst_r.funct7 == 0x01) {
+                    if (inst.inst_r.opcode == 0x33) subtype.type_r = R_MUL;
+                    else if (inst.inst_r.opcode == 0x3b) subtype.type_r = R_MULW;
+                }
                 else if (inst.inst_r.funct7 == 0x20) {
                     if (inst.inst_r.opcode == 0x33) subtype.type_r = R_SUB;
                     else if (inst.inst_r.opcode == 0x3b) subtype.type_r = R_SUBW;
@@ -190,17 +197,30 @@ struct RISCV_inst
             }
             else if (inst.inst_r.funct3 == 0x2) {
                 if (inst.inst_r.funct7 == 0x00) subtype.type_r = R_SLT;
+                else if (inst.inst_r.funct7 == 0x01) subtype.type_r = R_MULHSU;
+                else subtype.type_r = R_UNIMP;
+            }
+            else if (inst.inst_r.funct3 == 0x3) {
+                if (inst.inst_r.funct7 == 0x00) subtype.type_r = R_SLTU;
+                else if (inst.inst_r.funct7 == 0x01) subtype.type_r = R_MULHU;
                 else subtype.type_r = R_UNIMP;
             }
             else if (inst.inst_r.funct3 == 0x4) {
                 if (inst.inst_r.funct7 == 0x00) subtype.type_r = R_XOR;
-                else if (inst.inst_r.funct7 == 0x01) subtype.type_r = R_DIV;
+                else if (inst.inst_r.funct7 == 0x01) {
+                    if (inst.inst_r.opcode == 0x33) subtype.type_r = R_DIV;
+                    else if (inst.inst_r.opcode == 0x3b) subtype.type_r = R_DIVW;
+                }
                 else subtype.type_r = R_UNIMP;
             }
             else if (inst.inst_r.funct3 == 0x5) {
                 if (inst.inst_r.funct7 == 0x00) {
                     if (inst.inst_r.opcode == 0x33) subtype.type_r = R_SRL;
                     else if (inst.inst_r.opcode == 0x3b) subtype.type_r = R_SRLW;
+                }
+                else if (inst.inst_r.funct7 == 0x01) {
+                    if (inst.inst_r.opcode == 0x33) subtype.type_r = R_DIVU;
+                    else if (inst.inst_r.opcode == 0x3b) subtype.type_r = R_DIVUW;
                 }
                 else if (inst.inst_r.funct7 == 0x20) {
                     if (inst.inst_r.opcode == 0x33) subtype.type_r = R_SRA;
@@ -210,11 +230,18 @@ struct RISCV_inst
             } 
             else if (inst.inst_r.funct3 == 0x6) {
                 if (inst.inst_r.funct7 == 0x00) subtype.type_r = R_OR;
-                else if (inst.inst_r.funct7 == 0x01) subtype.type_r = R_REM;
+                else if (inst.inst_r.funct7 == 0x01) {
+                    if (inst.inst_r.opcode == 0x33) subtype.type_r = R_REM;
+                    else if (inst.inst_r.opcode == 0x3b) subtype.type_r = R_REMW;
+                }
                 else subtype.type_r = R_UNIMP;
             }
             else if (inst.inst_r.funct3 == 0x7) {
                 if (inst.inst_r.funct7 == 0x00) subtype.type_r = R_AND;
+                else if (inst.inst_r.opcode == 0x01) {
+                    if (inst.inst_r.opcode == 0x33) subtype.type_r = R_REMU;
+                    else if (inst.inst_r.opcode == 0x3b) subtype.type_r = R_REMUW;
+                }
                 else subtype.type_r = R_UNIMP;
             }
             else subtype.type_r = R_UNIMP;

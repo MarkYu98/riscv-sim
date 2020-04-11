@@ -120,12 +120,6 @@ static void remove_block(void *bp);
 static void insert_block(void *bp);
 static unsigned int get_listid(size_t bsize);
 
-/* Heap checker helper routines */
-static void checkblock(void *bp, int lineno);
-static int checklist(void *bp, int lineno, unsigned int listid);
-
-/* Some simple inline helper functions */
-
 /* Get the pointer to actual address from a 32-bit address value v*/
 static inline void *get_pointer(unsigned int v)
 {
