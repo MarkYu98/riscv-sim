@@ -1,5 +1,5 @@
 CXX := g++
-CXXFlags := -I. -O3
+CXXFlags := -I. -Iinclude -O3
 targets := riscv-sim riscv-sim-pipe
 srcs := riscv-sim.cpp riscv_proc.cpp
 headers := riscv_config.hpp riscv_isa.hpp riscv_proc.hpp
