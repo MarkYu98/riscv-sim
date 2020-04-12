@@ -4,8 +4,8 @@ RV64M := -Wa,-march=rv64im
 RVLIBLDFLAGS := -Wl,--gc-sections
 RVOBJDUMP := riscv64-unknown-elf-objdump -Ss
 
-tests_i = ackermann matmul # myqsort
-tests_m = ackermann_m matmul_m # myqsort_m
+tests_i = ackermann matmul myqsort
+tests_m = ackermann_m matmul_m myqsort_m
 
 all: $(tests_i) $(tests_m)
 rv64i: $(tests_i)

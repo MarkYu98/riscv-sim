@@ -6,8 +6,6 @@
 #include <assert.h>
 using namespace std;
 
-    
-
 REG alu_calc(REG src1, REG src2, unsigned ALU_FUNC)
 {
     switch (ALU_FUNC) {
@@ -435,6 +433,7 @@ void RISCV_proc::writeback()
         setPC = true;
     else if (opcode == 0x73) {  // SYSCALL
         reg_ulong[reg_W.rd] = 0;
+        pipe_cycle_count += config.latency.ecall;
         switch (reg_W.val) {
         case SYS_PRINT_I:
             cout << "<stdout> " << dec << (long long) reg_W.res << endl;
@@ -448,8 +447,10 @@ void RISCV_proc::writeback()
         }   break;
         case SYS_READ_I: {
             long long x;
-            if (inputstream.str().empty()) {
+            if (inputstream.rdbuf()->in_avail() == 0) {
                 cout << "<stdin> Waiting input: " << endl;
+                inputstream.clear();
+                inputstream.str();
                 string s;
                 getline(cin, s);
                 inputstream << s;
@@ -459,8 +460,10 @@ void RISCV_proc::writeback()
         }   break;
         case SYS_READ_C: {
             char c;
-            if (!inputstream) {
+            if (inputstream.rdbuf()->in_avail() == 0) {
                 cout << "<stdin> Waiting input: " << endl;
+                inputstream.clear();
+                inputstream.str();
                 string s;
                 getline(cin, s);
                 inputstream << s;
@@ -643,6 +646,7 @@ void RISCV_proc::execute(size_t steps)
         exec();
         mem();
         writeback();
+        pipe_cycle_count += 5;
         if (s == steps) break;
     } while (!flag_finished);
     inst_count += s;
@@ -733,6 +737,7 @@ void RISCV_proc::run_simulator()
             break;
         }
         else if (cmd[0] == 'b') set_breakpoint(cmd);
+        else if (cmd[0] == 'i') summary();
         else if (cmd[0] == 'd' || cmd[0] == 'e') {
             int bpid;
             try {
@@ -1138,6 +1143,14 @@ PIPE_REG_M RISCV_proc::calc_reg_M()
     else {
         result.res = alu_calc(reg_E.src1, reg_E.src2, reg_E.alu_func);
         result.val = reg_E.val;
+        if (reg_E.alu_func >= ALU_MUL && reg_E.alu_func <= ALU_MULHU)
+            pipe_cycle_count += config.latency.mul - 1;
+        else if (reg_E.alu_func >= ALU_DIV && reg_E.alu_func <= ALU_REMU)
+            pipe_cycle_count += config.latency.div - 1;
+        else if (reg_E.alu_func == ALU_MULW)
+            pipe_cycle_count += config.latency.mulw - 1;
+        else if (reg_E.alu_func >= ALU_DIVW && reg_E.alu_func <= ALU_REMUW)
+            pipe_cycle_count += config.latency.divw - 1;
     }
     result.rd = reg_E.rd;
     result.cond = reg_E.cond;

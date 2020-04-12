@@ -19,6 +19,20 @@ public:
     size_t heap_base, heap_max;                 // Heap address and size (max address)
     std::string entry_symbol;                   // Not used when set_entry_symbol is false
     std::string branch_prediction;              // Options: always, never, btfnt, ftbnt
+    struct {
+        size_t mul, mulw, div, divw, ecall;
+        size_t l1_cache, l2_cache, l3_cache, memory;
+        template<class Archive>
+        void serialize(Archive & archive)
+        {
+            archive(
+                CEREAL_NVP(mul), CEREAL_NVP(mulw), 
+                CEREAL_NVP(div), CEREAL_NVP(divw), CEREAL_NVP(ecall),
+                CEREAL_NVP(l1_cache), CEREAL_NVP(l2_cache),
+                CEREAL_NVP(l3_cache), CEREAL_NVP(memory)
+            ); 
+        }
+    } latency;
 
     template<class Archive>
     void serialize(Archive & archive)
@@ -27,7 +41,8 @@ public:
             CEREAL_NVP(set_entry_symbol), CEREAL_NVP(set_entry_addr), 
             CEREAL_HEX_NVP(entry_addr), CEREAL_HEX_NVP(max_memory_addr),
             CEREAL_HEX_NVP(heap_base), CEREAL_HEX_NVP(heap_max),
-            CEREAL_NVP(entry_symbol), CEREAL_NVP(branch_prediction)
+            CEREAL_NVP(entry_symbol), CEREAL_NVP(branch_prediction),
+            CEREAL_NVP(latency)
         ); 
     }
 
@@ -39,7 +54,8 @@ public:
             CEREAL_NVP(set_entry_symbol), CEREAL_NVP(set_entry_addr), 
             CEREAL_HEX_NVP(entry_addr), CEREAL_HEX_NVP(max_memory_addr),
             CEREAL_HEX_NVP(heap_base), CEREAL_HEX_NVP(heap_max),
-            CEREAL_NVP(entry_symbol), CEREAL_NVP(branch_prediction)
+            CEREAL_NVP(entry_symbol), CEREAL_NVP(branch_prediction),
+            CEREAL_NVP(latency)
         ); 
     }
 
@@ -53,7 +69,8 @@ public:
             CEREAL_NVP(set_entry_symbol), CEREAL_NVP(set_entry_addr),
             CEREAL_HEX_STR(entry_addr), CEREAL_HEX_STR(max_memory_addr),
             CEREAL_HEX_STR(heap_base), CEREAL_HEX_STR(heap_max),
-            CEREAL_NVP(entry_symbol), CEREAL_NVP(branch_prediction)
+            CEREAL_NVP(entry_symbol), CEREAL_NVP(branch_prediction),
+            CEREAL_NVP(latency)
         );
         entry_addr = std::stol(entry_addr_s, 0, 0);
         max_memory_addr = std::stol(max_memory_addr_s, 0, 0);

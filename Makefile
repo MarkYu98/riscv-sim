@@ -1,5 +1,5 @@
 CXX := g++
-CXXFlags := -I. -Iinclude -O3
+CXXFlags := -I. -Iinclude -O3 -std=c++11 -lstdc++fs
 targets := riscv-sim riscv-sim-pipe
 srcs := riscv-sim.cpp riscv_proc.cpp
 hdrs := riscv_config.hpp riscv_isa.hpp riscv_proc.hpp

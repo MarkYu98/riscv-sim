@@ -1,32 +1,42 @@
 #include <iostream>
 #include <fstream>
+#include <argparse.h>
 #include <elfio/elfio.hpp>
 #include <riscv_proc.hpp>
 #include <riscv_config.hpp>
 using namespace std;
 
-void load_config(Config &config, const char *filename)
-{
-    ifstream fin(filename);
-    cereal::JSONInputArchive iarchive(fin);
-    iarchive(config);
-}
-
-int main(int argc, char** argv)
+int main(int argc, const char** argv)
 {
     ios::sync_with_stdio(false);
-    if (argc != 2) {
-        cout << "Usage: " << argv[0] << " <elf_file>" << endl;
+#ifndef PIPE
+    argparse::ArgumentParser program("RISCV Simulator (instruction)");
+#else
+    argparse::ArgumentParser program("RISCV Simulator (pipeline)");
+#endif
+    program.add_argument().names({"-p", "--program"}).description("The ELF program to run.").required(true);
+    program.add_argument().names({"-c", "--config"}).description("Config file (JSON)").required(true);
+    program.enable_help();
+
+    auto err = program.parse(argc, argv);
+    if (err) {
+        cout << err.what() << endl;
+        program.print_help();
         return -1;
+    }
+
+    if (program.exists("help")) {
+        program.print_help();
+        return 0;
     }
 
     // Create elfio reader
     ELFIO::elfio reader;
     Config config;
-    config.load("config.json");
+    config.load(program.get<string>("c").c_str());
 
     // Load ELF data
-    if (!reader.load(argv[1])) {
+    if (!reader.load(program.get<string>("p").c_str())) {
         cout << "Can't find or process ELF file " << argv[1] << endl;
         return -2;
     }

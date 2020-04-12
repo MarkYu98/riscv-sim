@@ -180,7 +180,7 @@ private:
     std::string entry_literal;
     std::stringstream inputstream;
 
-    size_t inst_count;
+    size_t inst_count, pipe_cycle_count;
 
     pgtb_t pg_table;
     REG reg_ulong[32];
@@ -195,7 +195,6 @@ private:
     PIPE_REG_M reg_M;
     PIPE_REG_W reg_W;
 #ifdef PIPE
-    size_t pipe_cycle_count;
     PIPE_REG_F reg_w;
     PIPE_REG_D reg_f;
     PIPE_REG_E reg_d;
@@ -238,7 +237,7 @@ private:
     void run_simulator();
     void set_breakpoint(const std::string& cmd);
     void status(const std::string& cmd);
-    void summary(bool finished);
+    void summary(bool finished = false);
     void shell();
     void exit();
 };
