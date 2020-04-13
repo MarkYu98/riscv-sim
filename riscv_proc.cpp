@@ -412,11 +412,6 @@ void RISCV_proc::writeback()
         opcode == 0x17 || opcode == 0x37 || opcode == 0x1b) {
         if (reg_W.rd != R_ZERO) reg_ulong[reg_W.rd] = reg_W.res;
         if (reg_W.rd == R_SP) {
-            if (reg_W.res < config.heap_max) {
-                cout << dec2hex(reg_W.res) << endl;
-                cout << config.heap_max << endl;
-                cout << dec2hex(reg_F.PC) << endl;
-            }
             assert(reg_W.res >= config.heap_max);     // stack overflow
             alloc_page(reg_W.res, PTE_W);
         }
