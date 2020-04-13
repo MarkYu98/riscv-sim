@@ -18,7 +18,9 @@ public:
     size_t max_memory_addr;                     // Max reachable address for RV64 program
     size_t heap_base, heap_max;                 // Heap address and size (max address)
     std::string entry_symbol;                   // Not used when set_entry_symbol is false
+#ifdef PIPE
     std::string branch_prediction;              // Options: always, never, btfnt, ftbnt
+#endif
     struct {
         size_t mul, mulw, div, divw, ecall;
         size_t l1_cache, l2_cache, l3_cache, memory;
@@ -41,7 +43,10 @@ public:
             CEREAL_NVP(set_entry_symbol), CEREAL_NVP(set_entry_addr), 
             CEREAL_HEX_NVP(entry_addr), CEREAL_HEX_NVP(max_memory_addr),
             CEREAL_HEX_NVP(heap_base), CEREAL_HEX_NVP(heap_max),
-            CEREAL_NVP(entry_symbol), CEREAL_NVP(branch_prediction),
+            CEREAL_NVP(entry_symbol), 
+#ifdef PIPE
+            CEREAL_NVP(branch_prediction),
+#endif
             CEREAL_NVP(latency)
         ); 
     }
@@ -54,7 +59,10 @@ public:
             CEREAL_NVP(set_entry_symbol), CEREAL_NVP(set_entry_addr), 
             CEREAL_HEX_NVP(entry_addr), CEREAL_HEX_NVP(max_memory_addr),
             CEREAL_HEX_NVP(heap_base), CEREAL_HEX_NVP(heap_max),
-            CEREAL_NVP(entry_symbol), CEREAL_NVP(branch_prediction),
+            CEREAL_NVP(entry_symbol), 
+#ifdef PIPE
+            CEREAL_NVP(branch_prediction),
+#endif
             CEREAL_NVP(latency)
         ); 
     }
@@ -69,7 +77,10 @@ public:
             CEREAL_NVP(set_entry_symbol), CEREAL_NVP(set_entry_addr),
             CEREAL_HEX_STR(entry_addr), CEREAL_HEX_STR(max_memory_addr),
             CEREAL_HEX_STR(heap_base), CEREAL_HEX_STR(heap_max),
-            CEREAL_NVP(entry_symbol), CEREAL_NVP(branch_prediction),
+            CEREAL_NVP(entry_symbol), 
+#ifdef PIPE
+            CEREAL_NVP(branch_prediction),
+#endif
             CEREAL_NVP(latency)
         );
         entry_addr = std::stol(entry_addr_s, 0, 0);
