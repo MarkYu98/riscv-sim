@@ -51,5 +51,8 @@ int main()
 
 	matrix_mul(n, A, B, C);
 
+	free(A);
+	free(B);
+	free(C);
 	return 0;
 }
