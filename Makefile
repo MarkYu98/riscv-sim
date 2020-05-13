@@ -19,9 +19,12 @@ SUBDIRS = $(shell find . * -type d | grep -v "\.")
 
 .PHONY: all clean rv64i rv64m
 
-all: $(targets) rv64i rv64m
+all: $(targets) rv64i rv64m _cache
 rv64i: $(targets) tests_i mytests_i
 rv64m: $(targets) tests_m mytests_m
+
+_cache: 
+	$(MAKE) -C cache
 
 tests: 
 	$(MAKE) -C test
@@ -52,6 +55,7 @@ librvsysm.a: $(libsrcs) $(libhdrs)
 	$(RVAR) librvsysm.a $(libobjs)
 
 clean:
-	rm -f *.o *.a $(targets)
+	rm -f *.o *.a *.gch $(targets)
 	make -C test clean
 	make -C mytest clean
+	make -C cache clean

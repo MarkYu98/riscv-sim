@@ -6,7 +6,7 @@
     "heap_base": "0x1000000",
     "heap_max": "0x80000000",
     "entry_symbol": "main",
-    "branch_prediction": "always",
+    "branch_prediction": "btfnt",
     "latency": {
         "mul": 5, 
         "mulw": 3, 
