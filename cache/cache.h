@@ -6,45 +6,6 @@
 #include <map>
 #include "storage.h"
 
-class CacheLine {
-public:
-  CacheLine() {}
-  void init(int block_size) { data = new char[block_size]; sz = block_size; }
-  ~CacheLine() { delete[] data; }
-  bool isValid() const { return valid; }
-  bool isDirty() const { return dirty; }
-  size_t getTag() const { return tag; }
-  char *getContent() const { return data; }
-  void place(size_t tag, char *content) { this->tag = tag; memcpy(content, data, sz); valid = true; dirty = false; }
-  void write(size_t offset, size_t bytes, char *content) { memcpy(content, data+offset, bytes); dirty = true; }
-  void read(size_t offset, size_t bytes, char *content) { memcpy(data+offset, content, bytes); }
-  CacheLine *prev = nullptr, *next = nullptr;
-private:
-  bool valid = false, dirty = false;
-  size_t sz = 0, tag = 0;
-  char *data;
-};
-
-class CacheSet {
-public:
-  CacheSet() {}
-  void init(int associativity) { e = associativity; lines = new CacheLine[e]; tagmap.clear(); }
-  bool hit(size_t tag);
-  bool full();
-  void write(size_t tag, size_t offset, size_t bytes, char *content);
-  void read(size_t tag, size_t offset, size_t bytes, char *content);
-  void replace(CacheLine *victim, size_t tag, char *content);
-  void add(size_t tag, char *content);
-  CacheLine* getVictim() { return full() ? end : nullptr; }
-  ~CacheSet() { delete[] lines; }
-private:
-  void moveToHead(CacheLine *line);
-  std::map<size_t, int> tagmap;
-  int e = 0;
-  CacheLine *lines;
-  CacheLine *head, *end;
-};
-
 typedef struct CacheConfig_ {
   int size;
   int associativity;
@@ -59,6 +20,26 @@ typedef struct CacheConfig_ {
     }
 } CacheConfig;
 
+class CacheLine {
+public:
+  CacheLine() {}
+  void init(int block_size) { data = new char[block_size]; sz = block_size; dirty = false; valid = false; }
+  ~CacheLine() { delete[] data; }
+  bool isValid() const { return valid; }
+  bool isDirty() const { return dirty; }
+  size_t getTag() const { return tag; }
+  char *getContent() const { return data; }
+  void place(size_t tag, char *content) { this->tag = tag; memcpy(data, content, sz); valid = true; dirty = false; }
+  void write(size_t offset, size_t bytes, char *content);
+  void read(size_t offset, size_t bytes, char *content) { memcpy(content, data+offset, bytes); }
+  CacheLine *prev = nullptr, *next = nullptr;
+private:
+  bool valid = false, dirty = false;
+  size_t sz = 0, tag = 0;
+  char *data;
+};
+
+class CacheSet;
 class Cache: public Storage {
  public:
   Cache() {}
@@ -71,6 +52,7 @@ class Cache: public Storage {
   // Main access process
   void HandleRequest(uint64_t addr, int bytes, int read,
                      char *content, int &hit, int &time);
+  void flush();
 
  private:
   // Bypassing
@@ -84,6 +66,27 @@ class Cache: public Storage {
   CacheSet *cachesets = nullptr;
   Storage *lower_;
   DISALLOW_COPY_AND_ASSIGN(Cache);
+};
+
+class CacheSet {
+public:
+  CacheSet() {}
+  void init(int associativity, int block_size);
+  bool hit(size_t tag);
+  bool full();
+  void write(size_t tag, size_t offset, size_t bytes, char *content);
+  void read(size_t tag, size_t offset, size_t bytes, char *content);
+  void replace(CacheLine *victim, size_t tag, char *content);
+  void add(size_t tag, char *content);
+  CacheLine* getVictim() { return full() ? end : nullptr; }
+  ~CacheSet() { delete[] lines; }
+private:
+  friend void Cache::flush();
+  void moveToHead(CacheLine *line);
+  std::map<size_t, int> tagmap;
+  int e = 0;
+  CacheLine *lines;
+  CacheLine *head, *end;
 };
 
 #endif //CACHE_CACHE_H_ 

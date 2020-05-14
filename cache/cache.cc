@@ -1,17 +1,29 @@
 #include "cache.h"
 #include <math.h>
 #include <assert.h>
-#include <iostream>
-using namespace std;
 
 #define GETBITS(x, low, high) (x & ((~(1 << (low)) + 1) & ((1 << (high)) - 1)))
+
+void CacheLine::write(size_t offset, size_t bytes, char *content) { 
+  if (content) memcpy(data+offset, content, bytes);
+  else memset(data+offset, 0, bytes); 
+  dirty = true; 
+}
+
+void CacheSet::init(int associativity, int block_size) { 
+  e = associativity; 
+  lines = new CacheLine[e]; 
+  head = end = nullptr;
+  for (int i = 0; i < e; i++) lines[i].init(block_size);
+  tagmap.clear(); 
+}
 
 void CacheSet::moveToHead(CacheLine *line) {
   if (head == line) return;
   if (line->prev) line->prev->next = line->next;
   if (line->next) line->next->prev = line->prev;
   line->next = head; 
-  if (head) head->prev = line; 
+  if (head) head->prev = line;
   head = line;
   if (end == line) end = line->prev;
   if (!end) end = line;
@@ -29,7 +41,8 @@ bool CacheSet::full() {
 void CacheSet::read(size_t tag, size_t offset, size_t bytes, char *content) { 
   assert(tagmap.find(tag) != tagmap.end());
   int idx = tagmap[tag];
-  return lines[idx].read(tag, bytes, content);
+  lines[idx].read(offset, bytes, content);
+  moveToHead(&lines[idx]);
 }
 
 void CacheSet::write(size_t tag, size_t offset, size_t bytes, char *content) {
@@ -55,7 +68,7 @@ void CacheSet::replace(CacheLine *victim, size_t tag, char *content) {
 
 void Cache::SetConfig(CacheConfig cc) {
   config_ = cc;
-  if (cachesets) delete [] cachesets;
+  if (cachesets) { delete[] cachesets; }
   int size = config_.size;
   int associativity = config_.associativity;
   int set_num = config_.set_num;
@@ -65,12 +78,23 @@ void Cache::SetConfig(CacheConfig cc) {
   tbits = sizeof(size_t) * 8 - sbits - bbits;
   cachesets = new CacheSet[set_num];
   for (int i = 0; i < set_num; i++) {
-    cachesets[i].init(associativity);
+    cachesets[i].init(associativity, block_size);
   }
 }
 
 void Cache::GetConfig(CacheConfig &cc) {
   cc = config_;
+}
+
+void Cache::flush() {
+  for (int i = 0; i < config_.set_num; i++) {
+    for (CacheLine *line = cachesets[i].head; line; line = line->next) {
+      if (!line->isDirty()) continue;
+      size_t wb_addr = ((line->getTag() << (sbits + bbits)) | (i << bbits));
+      int lower_hit, lower_time;
+      lower_->HandleRequest(wb_addr, 1 << bbits, 0, line->getContent(), lower_hit, lower_time);
+    }
+  }
 }
 
 void Cache::HandleRequest(uint64_t addr, int bytes, int read,
@@ -93,7 +117,7 @@ void Cache::HandleRequest(uint64_t addr, int bytes, int read,
       } else {  // Write Hit
         if (this->config_.write_through) {  // Write through
           cachesets[s].write(tag, offset, bytes, content);
-          lower_->HandleRequest(addr, bytes, 1, content, lower_hit, lower_time);
+          lower_->HandleRequest(addr, bytes, 0, content, lower_hit, lower_time);
           time += lower_time;
         } else {  // Write back
           cachesets[s].write(tag, offset, bytes, content);
@@ -104,16 +128,17 @@ void Cache::HandleRequest(uint64_t addr, int bytes, int read,
     else { // Miss
       hit = 0;
       stats_.miss_num++;
-      if (read) {   // Read Miss
+      if (read) { 
+        // Replace or Add
         CacheLine *victim = cachesets[s].getVictim();
-        stats_.replace_num++;
+        if (victim) stats_.replace_num++;
         if (!this->config_.write_through && victim && victim->isDirty()) {  // Write back
-          size_t wb_addr = ((victim->getTag() << (sbits + bbits)) | (s << sbits));
+          size_t wb_addr = ((victim->getTag() << (sbits + bbits)) | (s << bbits));
           lower_->HandleRequest(wb_addr, 1 << bbits, 0, victim->getContent(), lower_hit, lower_time);
           time += lower_time;
         }
         char buf[1 << bbits];
-        lower_->HandleRequest(addr, 1 << bbits, 1, buf, lower_hit, lower_time);
+        lower_->HandleRequest((addr >> bbits) << bbits, 1 << bbits, 1, buf, lower_hit, lower_time);
         time += lower_time;
         stats_.fetch_num++;
         if (victim == nullptr) cachesets[s].add(tag, buf);
@@ -121,28 +146,29 @@ void Cache::HandleRequest(uint64_t addr, int bytes, int read,
         cachesets[s].read(tag, offset, bytes, content);
       } else {    // Write Miss
         if (this->config_.write_allocate) { // Write alloc
+          // Replace or Add
           CacheLine *victim = cachesets[s].getVictim();
-          stats_.replace_num++;
+          if (victim) stats_.replace_num++;
           if (!this->config_.write_through && victim && victim->isDirty()) {  // Write back
-            size_t wb_addr = ((victim->getTag() << (sbits + bbits)) | (s << sbits));
+            size_t wb_addr = ((victim->getTag() << (sbits + bbits)) | (s << bbits));
             lower_->HandleRequest(wb_addr, 1 << bbits, 0, victim->getContent(), lower_hit, lower_time);
             time += lower_time;
           }
           char buf[1 << bbits];
-          lower_->HandleRequest(addr, 1 << bbits, 1, buf, lower_hit, lower_time);
+          lower_->HandleRequest((addr >> bbits) << bbits, 1 << bbits, 1, buf, lower_hit, lower_time);
           time += lower_time;
           stats_.fetch_num++;
           if (victim == nullptr) cachesets[s].add(tag, buf);
           else cachesets[s].replace(victim, tag, buf);
           if (this->config_.write_through) {  // Write through
             cachesets[s].write(tag, offset, bytes, content);
-            lower_->HandleRequest(addr, bytes, 1, content, lower_hit, lower_time);
+            lower_->HandleRequest(addr, bytes, 0, content, lower_hit, lower_time);
             time += lower_time;
           } else {  // Write back
             cachesets[s].write(tag, offset, bytes, content);
           }
         } else { // No write alloc
-          lower_->HandleRequest(addr, bytes, 1, content, lower_hit, lower_time);
+          lower_->HandleRequest(addr, bytes, 0, content, lower_hit, lower_time);
           time += lower_time;
         }
       }

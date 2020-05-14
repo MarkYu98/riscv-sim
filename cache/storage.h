@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <iostream>
 
 #define DISALLOW_COPY_AND_ASSIGN(TypeName) \
   TypeName(const TypeName&); \
@@ -22,6 +23,8 @@ typedef struct StorageStats_ {
 typedef struct StorageLatency_ {
   int hit_latency; // In nanoseconds
   int bus_latency; // Added to each request
+  StorageLatency_() {}
+  StorageLatency_(int hit, int bus) : hit_latency(hit), bus_latency(bus) {}
 } StorageLatency;
 
 class Storage {

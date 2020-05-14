@@ -2,6 +2,8 @@
 #define RISCV_PROC_HPP
 
 #include <elfio/elfio.hpp>
+#include <cache/cache.h>
+#include <cache/memory.h>
 #include <riscv_isa.hpp>
 #include <riscv_config.hpp>
 #include <string>
@@ -70,7 +72,7 @@ typedef long long SREG;
 
 typedef struct {
     uint8_t flags = 0;
-    void *pg = NULL;
+    size_t paddr = 0;
 } pte_t;
 typedef std::map<size_t, pte_t> pgtb_t;    // PageTable
 
@@ -89,6 +91,32 @@ static size_t ROUND_DOWN(size_t bytes, size_t ALIGN)
 std::string dec2hex(size_t i);
 std::string dec2hex(size_t i, size_t bytes);
 REG alu_calc(REG src1, REG src2, unsigned ALU_FUNC);
+
+class CachedStorage {
+public:
+    CachedStorage() {
+        memory.SetPGSize(PGSIZE);
+        L1.SetLower(&L2);
+        L2.SetLower(&L3);
+        L3.SetLower(&memory);
+        ClearStats();
+    }
+    ~CachedStorage() {}
+    void ClearStats();
+    void PrintStats();
+    void flush();
+    void reset_memory() { memory.reset(); }
+    void SetConfig(CacheConfig cc1, CacheConfig cc2, CacheConfig cc3);
+    void SetLatency(StorageLatency ltc1, StorageLatency ltc2, StorageLatency ltc3, StorageLatency ltcm);
+    void free_page(size_t addr) { memory.free_page(addr); }
+    size_t alloc_page() { return memory.alloc_page(); }
+    void HandleRequest(size_t addr, int bytes, int read,
+                       char *content, int &time);
+private:
+    void StatsInfo(const StorageStats &s, bool ismem);
+    Cache L1, L2, L3;
+    Memory memory;
+};
 
 struct PIPE_REG_F {
     REG PC;
@@ -184,6 +212,7 @@ private:
 
     pgtb_t pg_table;
     REG reg_ulong[32];
+    CachedStorage storage; // Contains 3-level caches and memory
 
 #ifdef F_EXT
     REG reg_float[32];
@@ -208,9 +237,11 @@ private:
     REG predict_PC(REG thisPC, int imm);
     PIPE_REG_F select_PC();
 #endif 
+    void reset_cache();
+    void print_config();
 
     void read_memory(char *buf, size_t vaddr, size_t len);
-    void write_memory(const char *buf, size_t vaddr, size_t len, uint8_t flags); 
+    void write_memory(char *buf, size_t vaddr, size_t len, uint8_t flags); 
     void alloc_page(size_t vaddr, uint8_t flags);
 
     template<typename T> T memread(size_t vaddr);

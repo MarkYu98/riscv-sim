@@ -23,18 +23,39 @@ public:
 #endif
     struct {
         size_t mul, mulw, div, divw, ecall;
-        size_t l1_cache, l2_cache, l3_cache, memory;
+        size_t l1_bus, l1_hit, l2_bus, l2_hit, l3_bus, l3_hit, memory_bus, memory_hit;
         template<class Archive>
-        void serialize(Archive & archive)
-        {
+        void serialize(Archive & archive) {
             archive(
                 CEREAL_NVP(mul), CEREAL_NVP(mulw), 
                 CEREAL_NVP(div), CEREAL_NVP(divw), CEREAL_NVP(ecall),
-                CEREAL_NVP(l1_cache), CEREAL_NVP(l2_cache),
-                CEREAL_NVP(l3_cache), CEREAL_NVP(memory)
+                CEREAL_NVP(l1_hit), CEREAL_NVP(l1_bus),
+                CEREAL_NVP(l2_hit), CEREAL_NVP(l2_bus), 
+                CEREAL_NVP(l3_hit), CEREAL_NVP(l3_bus), 
+                CEREAL_NVP(memory_hit), CEREAL_NVP(memory_bus)
             ); 
         }
     } latency;
+
+    struct {
+        struct {
+            size_t size, associativity, block_size;
+            bool writeback;
+            template<class Archive>
+            void serialize(Archive & archive) {
+                archive(
+                    CEREAL_NVP(size), CEREAL_NVP(associativity), 
+                    CEREAL_NVP(block_size), CEREAL_NVP(writeback)
+                ); 
+            }
+        } l1, l2, l3;
+        template<class Archive>
+        void serialize(Archive & archive) {
+            archive(
+                CEREAL_NVP(l1), CEREAL_NVP(l2), CEREAL_NVP(l3)
+            ); 
+        }
+    } cache;
 
     template<class Archive>
     void serialize(Archive & archive)
@@ -47,7 +68,7 @@ public:
 #ifdef PIPE
             CEREAL_NVP(branch_prediction),
 #endif
-            CEREAL_NVP(latency)
+            CEREAL_NVP(latency), CEREAL_NVP(cache)
         ); 
     }
 
@@ -63,7 +84,7 @@ public:
 #ifdef PIPE
             CEREAL_NVP(branch_prediction),
 #endif
-            CEREAL_NVP(latency)
+            CEREAL_NVP(latency), CEREAL_NVP(cache)
         ); 
     }
 
@@ -81,7 +102,7 @@ public:
 #ifdef PIPE
             CEREAL_NVP(branch_prediction),
 #endif
-            CEREAL_NVP(latency)
+            CEREAL_NVP(latency), CEREAL_NVP(cache)
         );
         entry_addr = std::stol(entry_addr_s, 0, 0);
         max_memory_addr = std::stol(max_memory_addr_s, 0, 0);

@@ -1,9 +1,16 @@
 #include <riscv_proc.hpp>
 #include <riscv_config.hpp>
 #include <iostream>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <assert.h>
+#define GET_CACHE_CFG(config, name) CacheConfig(config.cache.name.size, \
+                                                config.cache.name.associativity, \
+                                                config.cache.name.size / \
+                                                (config.cache.name.block_size * config.cache.name.associativity), \
+                                                config.cache.name.writeback)
+#define GET_CACHE_LATENCY(config, name) StorageLatency(config.latency.name##_hit, config.latency.name##_bus)
 using namespace std;
 
 REG alu_calc(REG src1, REG src2, unsigned ALU_FUNC)
@@ -177,6 +184,83 @@ ELF_SYMBOL::ELF_SYMBOL(uint8_t bind, uint8_t type, uint8_t other,
                        bind(bind), type(type), other(other), idx(idx), value(value), 
                        size(size), section_index(section_index), name(name) {}
 
+void CachedStorage::ClearStats()
+{
+    StorageStats stats;
+    stats.access_time = 0;
+    L1.SetStats(stats);
+    L2.SetStats(stats);
+    L3.SetStats(stats);
+    memory.SetStats(stats);
+}
+
+void CachedStorage::SetConfig(CacheConfig cc1, CacheConfig cc2, CacheConfig cc3)
+{
+    L1.SetConfig(cc1); L2.SetConfig(cc2); L3.SetConfig(cc3);
+}
+
+void CachedStorage::SetLatency(StorageLatency ltc1, StorageLatency ltc2, StorageLatency ltc3, StorageLatency ltcm)
+{
+    L1.SetLatency(ltc1); L2.SetLatency(ltc2); L3.SetLatency(ltc3); memory.SetLatency(ltcm);
+}
+
+void CachedStorage::HandleRequest(size_t addr, int bytes, int read, char *content, int &time)
+{
+    CacheConfig cc;
+    L1.GetConfig(cc);
+    size_t block_size = cc.size / (cc.associativity * cc.set_num);
+    size_t start = addr, end = addr + bytes;
+    time = 0;
+    while (addr < end) {
+        size_t block_bytes = min(ROUND_DOWN(addr, block_size) + block_size - addr, end - addr);
+        int _hit, _time;
+        if (content) 
+            L1.HandleRequest(addr, block_bytes, read, content + addr - start, _hit, _time);
+        else
+            L1.HandleRequest(addr, block_bytes, read, nullptr, _hit, _time);
+        time += _time;
+        addr += block_bytes;
+    }
+}
+
+void CachedStorage::flush()
+{
+    L1.flush(); L2.flush(); L3.flush();
+}
+
+void CachedStorage::StatsInfo(const StorageStats &s, bool ismem=true)
+{
+    cout << "   Access time (CPU cycles): " << dec << s.access_time << endl;
+    // cout << "L1 Cache access time (Nanoseconds): " << fixed << setprecision(2) 
+    //      << (double)s.access_time / cpu_freq_GHz << endl;
+    cout << "   Access count: " << s.access_counter << endl;
+    if (ismem) {
+        cout << "   Miss count: " << s.miss_num << endl;
+        cout << "    - Miss rate: " << fixed << setprecision(2) 
+             << 100 * (double)s.miss_num / s.access_counter << "%" << endl;
+        cout << "   Replace count: " << s.replace_num << endl; 
+        cout << "   Fetch count: " << s.fetch_num << endl;
+    }
+    cout << endl;
+}
+
+void CachedStorage::PrintStats()
+{
+    StorageStats stats;
+    L1.GetStats(stats);
+    cout << "L1 Cache:" << endl;
+    StatsInfo(stats);
+    L2.GetStats(stats);
+    cout << "L2 Cache:" << endl;
+    StatsInfo(stats);
+    L3.GetStats(stats);
+    cout << "L3 Cache:" << endl;
+    StatsInfo(stats);
+    memory.GetStats(stats);
+    cout << "memory:" << endl;
+    StatsInfo(stats, false);
+}
+
 bool RISCV_proc::get_symbol(const string &symbol, ELF_SYMBOL** psym) 
 {
     for (auto &sym : symtab) {
@@ -246,19 +330,22 @@ void RISCV_proc::load_memory()
     ELFIO::Elf_Half seg_num = elf_reader.segments.size();
     ELFIO::segment *pseg;
     cout << "Loading ELF segments into user memory space ...";
+    reset_cache();
     for (int i = 0; i < seg_num; i++) {
         pseg = elf_reader.segments[i];
         if (pseg->get_type() == PT_LOAD) { // Alloc: memcpy
             uint8_t flags = 0;
             if (pseg->get_flags() & PF_X) flags |= PTE_X;
             if (pseg->get_flags() & PF_W) flags |= PTE_W;
-            write_memory(pseg->get_data(), pseg->get_virtual_address(), pseg->get_file_size(), flags);
+            write_memory(const_cast<char *>(pseg->get_data()), pseg->get_virtual_address(), 
+                         pseg->get_file_size(), flags);
             write_memory(NULL, pseg->get_virtual_address() + pseg->get_file_size(), 
                          pseg->get_memory_size() - pseg->get_file_size(), flags);
             if (pseg->get_virtual_address() + pseg->get_memory_size() >= heap)
                 heap = ROUND_UP(pseg->get_virtual_address() + pseg->get_memory_size(), PGSIZE);
         }
     }
+    storage.flush();
     cout << "Loaded." << endl;
 }
 
@@ -302,6 +389,21 @@ RISCV_proc::~RISCV_proc()
     clear_pg_table();
 }
 
+void RISCV_proc::reset_cache()
+{
+    CacheConfig cc1 = GET_CACHE_CFG(config, l1);
+    CacheConfig cc2 = GET_CACHE_CFG(config, l2);
+    CacheConfig cc3 = GET_CACHE_CFG(config, l3);
+    storage.SetConfig(cc1, cc2, cc3);
+
+    StorageLatency ltc1 = GET_CACHE_LATENCY(config, l1);
+    StorageLatency ltc2 = GET_CACHE_LATENCY(config, l2);
+    StorageLatency ltc3 = GET_CACHE_LATENCY(config, l3);
+    StorageLatency ltcm = GET_CACHE_LATENCY(config, memory);
+    storage.SetLatency(ltc1, ltc2, ltc3, ltcm);
+    storage.ClearStats();
+}
+
 void RISCV_proc::read_memory(char *buf, size_t vaddr, size_t len)
 {
     size_t curpg, start = vaddr, end = vaddr + len;
@@ -311,13 +413,16 @@ void RISCV_proc::read_memory(char *buf, size_t vaddr, size_t len)
         if (!PG_ALLOC(pte)) cout << dec2hex(vaddr) << endl;
         assert(PG_ALLOC(pte));
 
-        size_t copy_size = min(curpg + PGSIZE - vaddr, end - vaddr);
-        memcpy(buf + vaddr - start, (char *)(pte.pg) + (vaddr - curpg), copy_size);
-        vaddr += copy_size;
+        size_t read_bytes = min(curpg + PGSIZE - vaddr, end - vaddr);
+        int time;
+        storage.HandleRequest(pte.paddr + (vaddr - curpg), read_bytes, 1, 
+                             buf + vaddr - start, time);
+        pipe_cycle_count += time;
+        vaddr += read_bytes;
     }
 }
 
-void RISCV_proc::write_memory(const char *buf, size_t vaddr, size_t len, uint8_t flags = 0)
+void RISCV_proc::write_memory(char *buf, size_t vaddr, size_t len, uint8_t flags = 0)
 {
     size_t curpg, start = vaddr, end = vaddr + len;
     while (vaddr < end) {
@@ -326,12 +431,14 @@ void RISCV_proc::write_memory(const char *buf, size_t vaddr, size_t len, uint8_t
         if (flags) alloc_page(curpg, flags);
         else assert(PG_ALLOC(pte) && PG_WRITE(pte));
 
-        size_t copy_size = min(curpg + PGSIZE - vaddr, end - vaddr);
-        if (buf)
-            memcpy((char *)(pte.pg) + (vaddr - curpg), buf + vaddr - start, copy_size);
+        size_t write_bytes = min(curpg + PGSIZE - vaddr, end - vaddr);
+        int time;
+        if (buf) 
+            storage.HandleRequest(pte.paddr + (vaddr - curpg), write_bytes, 0, buf + vaddr - start, time);
         else
-            memset((char *)(pte.pg) + (vaddr - curpg), 0, copy_size);
-        vaddr += copy_size;
+            storage.HandleRequest(pte.paddr + (vaddr - curpg), write_bytes, 0, nullptr, time);
+        pipe_cycle_count += time;
+        vaddr += write_bytes;
     }
 }
 
@@ -339,7 +446,7 @@ void RISCV_proc::alloc_page(size_t vaddr, uint8_t flags)
 {
     pte_t &pte = pg_table[PAGE(vaddr)];
     if (PG_ALLOC(pte)) return;
-    pte.pg = malloc(PGSIZE);
+    pte.paddr = storage.alloc_page();
     pte.flags = (flags | PTE_P);
 }
 
@@ -665,13 +772,12 @@ void RISCV_proc::run_simulator()
     reg_ulong[R_SP] = config.max_memory_addr - 8;   // stack
     heap = config.heap_base;                        // heap
     load_memory();
+    reset_cache();
     heap_base = heap;
     alloc_page(reg_ulong[R_SP], PTE_W);
     alloc_page(heap, PTE_W);
 
-#ifdef PIPE
     pipe_cycle_count = 0;
-#endif
     inst_count = 0;
     flag_finished = flag_break = false;
     
@@ -691,6 +797,7 @@ void RISCV_proc::run_simulator()
         REG pc = reg_W.PC;
         if (!PG_EXEC(pg_table[PAGE(pc)])) {
             cout << "Fatal: PC Encountered unexecutable memory address! Execution stopped." << endl;
+            cout << dec2hex(pc) << endl;
             break;
         }
         cout << "next inst.: <0x" << dec2hex(pc) << ">\t" << RISCV_inst(memread<raw_inst_t>(pc)) << endl;
@@ -767,7 +874,7 @@ void RISCV_proc::clear_pg_table()
     pgtb_t::iterator it;
     for (it = pg_table.begin(); it != pg_table.end(); it++) {
         if (it->second.flags & PTE_P)
-            free(it->second.pg);
+            storage.free_page(it->second.paddr);
     }
     pg_table.clear();
 }
@@ -785,10 +892,36 @@ void RISCV_proc::clear_regs()
 void RISCV_proc::start()
 {
     load_prog();
+    print_config();
     cout << endl;
     cout << "Welcome to MarkYu's RISC-V simulator!" << endl;
     shell();
     exit();
+}
+
+void RISCV_proc::print_config()
+{
+    cout << "-----------Simulator configurations------------" << endl;
+    cout << "Memory Heap: \tbase=0x" << dec2hex(config.heap_base) << "\tmax=0x" << dec2hex(config.heap_max) << endl;
+    cout << "Latency Settings (CPU cycles): " << dec << endl;
+    cout << "   Instructions: mul:" << config.latency.mul << "\tmulw:" << config.latency.mulw << 
+                           "\tdiv:" << config.latency.div << "\tdivw:" << config.latency.divw <<
+                           "\tecall:" << config.latency.ecall << endl;
+    cout << "   L1 Cache:     Bus:" << config.latency.l1_bus << "\tHit:" << config.latency.l1_bus << endl;
+    cout << "   L2 Cache:     Bus:" << config.latency.l2_bus << "\tHit:" << config.latency.l2_bus << endl;
+    cout << "   L3 Cache:     Bus:" << config.latency.l3_bus << "\tHit:" << config.latency.l3_bus << endl;
+    cout << "   Memory:       Bus:" << config.latency.memory_bus << "\tHit:" << config.latency.memory_bus << endl;
+    cout << "Cache Settings: " << endl;
+    cout << "   L1 Cache:     Size:" << config.cache.l1.size << "B\t\tAssoc:" << config.cache.l1.associativity << endl;
+    cout << "                 Block Size:" << config.cache.l1.block_size << "B\t\tWrite Policy:" 
+         << (config.cache.l1.writeback ? "Write Back/Write Alloc" : "Write Through / No Write Alloc") << endl;
+    cout << "   L2 Cache:     Size:" << config.cache.l2.size << "B\t\tAssoc:" << config.cache.l2.associativity << endl;
+    cout << "                 Block Size:" << config.cache.l2.block_size << "B\tWrite Policy:" 
+         << (config.cache.l2.writeback ? "Write Back/Write Alloc" : "Write Through / No Write Alloc") << endl;
+    cout << "   L3 Cache:     Size:" << config.cache.l3.size << "B\t\tAssoc:" << config.cache.l3.associativity << endl;
+    cout << "                 Block Size:" << config.cache.l3.block_size << "B\tWrite Policy:" 
+         << (config.cache.l3.writeback ? "Write Back/Write Alloc" : "Write Through / No Write Alloc") << endl;
+    cout << "-----------------------------------------------" << endl;
 }
 
 void RISCV_proc::shell()
@@ -983,8 +1116,12 @@ void RISCV_proc::summary(bool finished)
         cout << endl << "================SUMMARY================" << endl;
     cout << "Total instructions executed: " << dec << inst_count << endl;
 #ifdef PIPE
-    cout << "Total Pipeline cycle: " << dec << pipe_cycle_count << endl;
+    cout << "Total Execution time (CPU cycles): " << dec << pipe_cycle_count << endl;
+    if (finished) 
+        cout << "   CPI: " << fixed << setprecision(3) << (double)(pipe_cycle_count) / inst_count << endl << endl;
 #endif
+    if (finished) 
+        storage.PrintStats();
 }
 
 void RISCV_proc::exit()

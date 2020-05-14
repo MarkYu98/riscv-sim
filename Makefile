@@ -3,6 +3,7 @@ CXXFlags := -I. -Iinclude -O3 -std=c++11 -lstdc++fs
 targets := riscv-sim riscv-sim-pipe
 srcs := riscv-sim.cpp riscv_proc.cpp
 hdrs := riscv_config.hpp riscv_isa.hpp riscv_proc.hpp
+cache_objs := cache/cache.o cache/memory.o
 
 libsrcs := riscv_memlib.c riscv_syscall.c 
 libhdrs := riscv_memlib.h riscv_syscall.h
@@ -24,7 +25,11 @@ rv64i: $(targets) tests_i mytests_i
 rv64m: $(targets) tests_m mytests_m
 
 _cache: 
-	$(MAKE) -C cache
+	$(MAKE) -C cache cache-sim
+cache/cache.o: cache/cache.cc cache/cache.h cache/storage.h
+	$(MAKE) -C cache cache.o
+cache/memory.o: cache/memory.cc cache/memory.h cache/storage.h
+	$(MAKE) -C cache memory.o
 
 tests: 
 	$(MAKE) -C test
@@ -40,11 +45,11 @@ mytests_i: librvsysi.a
 mytests_m: librvsysm.a
 	$(MAKE) -C mytest rv64m
 
-riscv-sim: $(srcs) $(hdrs)
-	$(CXX) -o riscv-sim $(srcs) $(CXXFlags)
+riscv-sim: $(srcs) $(hdrs) $(cache_objs)
+	$(CXX) -o riscv-sim $(srcs) $(cache_objs) $(CXXFlags)
 
-riscv-sim-pipe: $(srcs) $(hdrs)
-	$(CXX) -o riscv-sim-pipe $(srcs) $(CXXFlags) -DPIPE
+riscv-sim-pipe: $(srcs) $(hdrs) $(cache_objs)
+	$(CXX) -o riscv-sim-pipe $(srcs) $(cache_objs) $(CXXFlags) -DPIPE
 
 librvsysi.a: $(libsrcs) $(libhdrs)
 	$(RVCC) $(RV64I) $(RVLIBCFLAGS) -c $(libsrcs) 
